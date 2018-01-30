@@ -1,10 +1,14 @@
 package garnet
 
-import "net"
+import (
+	"net"
+
+	"github.com/smallnest/garnet/codec"
+)
 
 type Handler interface {
 	Connected(net.Conn)
 	Disconnected(net.Conn)
-	Handle(conn net.Conn, v interface{}) error
+	Handle(frameCodec codec.FrameCodec, v interface{}) error
 	ErrorCaught(err error)
 }

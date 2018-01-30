@@ -3,11 +3,14 @@ package garnet
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/orcaman/concurrent-map"
+	"github.com/smallnest/garnet/codec"
 	"github.com/smallnest/log"
 )
 
@@ -15,7 +18,8 @@ type Server struct {
 	network    string
 	addr       string
 	connOption func(net.Conn) net.Conn
-	codecs     []Codec
+	codecs     []codec.Codec
+	frameFunc  codec.FrameFunc
 	handler    Handler
 	clients    cmap.ConcurrentMap
 
@@ -26,7 +30,7 @@ func (s *Server) SetConnOption(fn func(net.Conn) net.Conn) {
 	s.connOption = fn
 }
 
-func (s *Server) AddCodec(codec Codec) {
+func (s *Server) AddCodec(codec codec.Codec) {
 	s.codecs = append(s.codecs, codec)
 }
 
@@ -40,6 +44,7 @@ func (s *Server) Serve(network, addr string) error {
 	}
 
 	s.addr = addr
+	s.network = network
 	ln, err := makeListener(network, addr)
 	if err != nil {
 		return err
@@ -96,24 +101,64 @@ func (s *Server) handleConn(conn net.Conn) {
 		conn = s.connOption(conn)
 	}
 
-	var err error
+	if s.frameFunc == nil {
+		log.Errorf("frameCodec must not be nil")
+		return
+	}
 
+	frameConn := s.frameFunc(conn)
 	for {
-		var v interface{} = conn
+		v, err := frameConn.ReadFrame()
+		if err != nil {
+			if err == io.EOF || strings.Contains(err.Error(), "use of closed network connection") {
+				return
+			}
+			log.Errorf("failed to read a frame because of %v", err)
+			s.handler.ErrorCaught(err)
+			return
+		}
 		for _, c := range s.codecs {
 			v, err = c.Decode(v)
 			if err != nil {
 				log.Errorf("failed to decode from %s because of %v", conn.RemoteAddr(), err)
+				s.handler.ErrorCaught(err)
 				return
 			}
 		}
 
-		err = s.handler.Handle(conn, v)
+		err = s.handler.Handle(frameConn, v)
 		if err != nil {
 			log.Errorf("failed to handle message from %s because of %v", conn.RemoteAddr(), err)
+			s.handler.ErrorCaught(err)
 			return
 		}
 	}
+}
+
+func (s *Server) Write(frameConn codec.FrameCodec, data interface{}) error {
+	if frameConn == nil {
+		return errors.New("frameConn must not be nil")
+	}
+
+	var err error
+	l := len(s.codecs)
+	var v interface{} = data
+	for i := l - 1; i >= 0; i-- {
+		cc := s.codecs[i]
+		v, err = cc.Encode(v)
+		if err != nil {
+			return err
+		}
+	}
+
+	var result []byte
+	var ok bool
+	if result, ok = v.([]byte); !ok {
+		return fmt.Errorf("the final type of encoded data must be []byte but got %T", v)
+	}
+
+	err = frameConn.WriteFrame(result)
+	return err
 }
 
 func (s *Server) Close() {
@@ -122,7 +167,11 @@ func (s *Server) Close() {
 		if err != nil {
 			log.Error("failed to close %s", v.(net.Conn).RemoteAddr())
 		}
+
+		s.handler.Disconnected(v.(net.Conn))
 	})
+
+	atomic.StoreInt32(&s.stopped, 1)
 }
 
 func makeListener(network, addr string) (net.Listener, error) {
