@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/smallnest/garnet/codec"
-	"github.com/smallnest/log"
+	"github.com/smallnest/garnet/handler"
+	"github.com/smallnest/rpcx/log"
 )
 
 type Client struct {
@@ -21,7 +22,7 @@ type Client struct {
 	frameConn  codec.FrameCodec
 	codecs     []codec.Codec
 	frameFunc  codec.FrameFunc
-	handler    Handler
+	handler    handler.Handler
 
 	DialTimeout time.Duration
 
@@ -32,11 +33,15 @@ func (c *Client) SetConnOption(fn func(net.Conn) net.Conn) {
 	c.connOption = fn
 }
 
+func (c *Client) SetFrameFunc(frameFunc codec.FrameFunc) {
+	c.frameFunc = frameFunc
+}
+
 func (c *Client) AddCodec(codec codec.Codec) {
 	c.codecs = append(c.codecs, codec)
 }
 
-func (c *Client) SetHandler(handler Handler) {
+func (c *Client) SetHandler(handler handler.Handler) {
 	c.handler = handler
 }
 

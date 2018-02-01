@@ -11,7 +11,8 @@ import (
 
 	"github.com/orcaman/concurrent-map"
 	"github.com/smallnest/garnet/codec"
-	"github.com/smallnest/log"
+	"github.com/smallnest/garnet/handler"
+	"github.com/smallnest/rpcx/log"
 )
 
 type Server struct {
@@ -20,21 +21,30 @@ type Server struct {
 	connOption func(net.Conn) net.Conn
 	codecs     []codec.Codec
 	frameFunc  codec.FrameFunc
-	handler    Handler
+	handler    handler.Handler
 	clients    cmap.ConcurrentMap
 
 	stopped int32
 }
 
+func NewServer() *Server {
+	return &Server{
+		clients: cmap.New(),
+	}
+}
 func (s *Server) SetConnOption(fn func(net.Conn) net.Conn) {
 	s.connOption = fn
+}
+
+func (s *Server) SetFrameFunc(frameFunc codec.FrameFunc) {
+	s.frameFunc = frameFunc
 }
 
 func (s *Server) AddCodec(codec codec.Codec) {
 	s.codecs = append(s.codecs, codec)
 }
 
-func (s *Server) SetHandler(handler Handler) {
+func (s *Server) SetHandler(handler handler.Handler) {
 	s.handler = handler
 }
 
@@ -178,12 +188,12 @@ func makeListener(network, addr string) (net.Listener, error) {
 	switch network {
 	case "tcp", "tcp4", "tcp6":
 		return net.Listen(network, addr)
-	case "udp", "udp4", "udp6":
-		return net.Listen(network, addr)
+	// case "udp", "udp4", "udp6":
+	// 	return net.ListenUDP(network, addr)
 	case "unix":
 		return net.Listen(network, addr)
-	case "unixpacket":
-		return net.Listen(network, addr)
+		// case "unixpacket":
+		// 	return net.Listen(network, addr)
 	}
 
 	return nil, fmt.Errorf("unsupported network: %s", network)

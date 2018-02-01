@@ -1,4 +1,4 @@
-package garnet
+package handler
 
 import (
 	"net"
